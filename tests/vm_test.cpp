@@ -54,11 +54,12 @@ struct BytecodeHolder {
 
 template<class T>
 void run_checked(std::vector<Value> constants, BytecodeHolder &h, T check) {
-    VMData& vm = vm_instance();
+    VMData &vm = vm_instance();
+    vm.heap[0] = new ObjClass{.name = "NULL"};
     h.emit(OP_STOP);
     memcpy(vm.constant_pool, constants.data(), constants.size() * sizeof(Value));
     std::copy(h.code.begin(), h.code.end(), vm.code);
-    vm.sp = 0;
+    vm.sp = vm.stack;
     vm.ip = 0;
     run();
     check(vm);
@@ -66,9 +67,9 @@ void run_checked(std::vector<Value> constants, BytecodeHolder &h, T check) {
 
 void run1(std::vector<Value> constants, BytecodeHolder &h, std::vector<Value> stack) {
     return run_checked(std::move(constants), h, [&](VMData &vm) {
-        ASSERT_TRUE(vm.sp == stack.size());
+        ASSERT_TRUE(vm.sp - vm.stack == stack.size());
         for (int i = 0; i < stack.size(); ++i) {
-            std::cout << vm.stack[i].mdata.asInt << std::endl;
+            std::cout << vm.stack[i].as_int << std::endl;
             ASSERT_TRUE(equal_val(stack[i], vm.stack[i]));
         }
     });
@@ -80,30 +81,30 @@ using VmExampleStackTestSuite = Test;
 TEST(VmExampleStackTestSuite, ExampleTest) {
     //example test
     run1({
-                             Value(ValueType::Int, 3),
-                             Value(ValueType::Int, 2),
-                             Value(ValueType::Int, 100000),
-                             Value(ValueType::Int, 5)
-                     },
-                     BytecodeHolder()
-                             .emitC(OP_CONSTANT, 0)
-                             .emitC(OP_CONSTANT, 1)
-                             .emitC(OP_CONSTANT, 3)
-                             .jmp(OP_JMPNE, "l1")
-                             .emitC(OP_CONSTANT, 2)
-                             .label("l1")
-                             .emitC(OP_CONSTANT, 1)
-                             .emit(OP_ADDI)
-                             .update(), {
-                             Value(ValueType::Int, 5)
-                     });
+                 Value::boxedInt(3),
+                 Value::boxedInt(2),
+                 Value::boxedInt(100000),
+                 Value::boxedInt(5),
+         },
+         BytecodeHolder()
+                 .emitC(OP_CONSTANT, 0)
+                 .emitC(OP_CONSTANT, 1)
+                 .emitC(OP_CONSTANT, 3)
+                 .jmp(OP_JMPNE, "l1")
+                 .emitC(OP_CONSTANT, 2)
+                 .label("l1")
+                 .emitC(OP_CONSTANT, 1)
+                 .emit(OP_ADDI)
+                 .update(), {
+                 Value::boxedInt(5),
+         });
     //4 * 2 * 3 + 4 + 8 - 7 * 7 = 24 + 12 - 49 = -13
     run1({
-                 Value(ValueType::Int, 2),
-                 Value(ValueType::Int, 3),
-                 Value(ValueType::Int, 4),
-                 Value(ValueType::Int, 8),
-                 Value(ValueType::Int, 7)
+                 Value::boxedInt(2),
+                 Value::boxedInt(3),
+                 Value::boxedInt(4),
+                 Value::boxedInt(8),
+                 Value::boxedInt(7)
          },
          BytecodeHolder()
                  .emitC(OP_CONSTANT, 4)
@@ -120,7 +121,7 @@ TEST(VmExampleStackTestSuite, ExampleTest) {
                  .emit(OP_ADDI)
                  .emit(OP_SUBI)
                  .update(), {
-                 Value(ValueType::Int, -13)
+                 Value::boxedInt(-13)
          });
 
 }

@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <fstream>
+#include <unordered_map>
 
 namespace interpreter {
     using byte = uint8_t;
@@ -61,28 +62,47 @@ namespace interpreter {
         // TODO: clojures, classes, objects, arrays; (for, while - more specific)
 
     };
-    enum class ValueType : uint8_t {
-        Int,
-        Double,
-        Char,
+    static constexpr uint32_t NULL_VAL = 1;//001
+    static constexpr uint32_t LAST3_PTR = 7;//111
+    static constexpr uint32_t NORMAL_PTR_ = ~(LAST3_PTR);//111...000 - offset by 8
+
+#define IS_INT(x) (((x).as_int & 1) == 0)
+#define IS_CLASS_OBJ(x) (!IS_INT(x))
+#define UNBOX_INT(x) ((x).as_int >> 1)
+#define UNBOX_OBJ_OFFSET(x) ((x).as_uint & NORMAL_PTR_)
+//dereference* object to do it!
+#define GET_CLASSPTR_FROM_VAL(x, heap) static_cast<ObjInstance*>(*(UNBOX_OBJ_OFFSET(x) + (heap)))
+
+    struct VMData;
+    struct Value;
+typedef void(*nativeFunc)(VMData&);
+
+    struct ObjClass {
+        nativeFunc operators[10];//better be multiple of 2(for 32 bit systems)
+        std::unordered_map<int, int> layout;
+        std::string name;
+        int8_t nfields = 0;
     };
-
-    union ValueData {
-        int64_t asInt;
-        double asDouble;
-
-        ValueData(int64_t asInt) : asInt(asInt) {}
-        // TODO: obj, array,...
+    struct ObjInstance {
+        ObjClass* classptr;
     };
-
+    struct ObjFunction {
+        ObjClass* classptr;
+        int params = 0;
+    };
     struct Value {
-        ValueType mtype;
-        ValueData mdata;
+        union {
+            int32_t as_int;
+            uint32_t as_uint;
+        };
 
-        Value(ValueType mtype, ValueData mdata) : mtype(mtype), mdata(mdata) {}
-
-        Value() : Value(ValueType::Int, 1) {}
+        inline static Value boxedInt(int32_t val) { return Value((uint32_t)(val << 1)); }
+        inline static Value boxedOffset(uint32_t offset) { return Value(offset | 1); }
+        explicit Value() : as_uint(NULL_VAL) {}
+    private:
+        explicit Value(uint32_t offset) : as_uint(offset)  {}
     };
+
 
 // Codes and arguments sizes
     static constexpr int OPCODE_SIZE = 6;
@@ -95,14 +115,18 @@ namespace interpreter {
 // Internal interpreter sizes
     static constexpr int MAX_CONSTANTS = 1 << 8;
     static constexpr int PROGRAM_STACK_SIZE = 1024;
+    static constexpr int HEAP_SIZE = 1 << 30;
     struct VMData {
         Value constant_pool[MAX_CONSTANTS];
         int constant_count = 0;
-        uint32_t ip = 0, sp = 0;
+        Value* sp = &stack[0];
+        uint32_t ip = 0, bp = 0;
         uint32_t cur = 0;
         uint32_t code[1024];  // actually will contain list of function - each has a pointer to a block of code
 
+        void* heap[1000];//HEAP_SIZE TODO: <- remove this
         Value stack[PROGRAM_STACK_SIZE];
+        Value locals[1024];
     };
 
     bool less(Value val1, Value val2);
@@ -123,7 +147,7 @@ namespace interpreter {
 
     void jmp_example();
 
-    VMData& vm_instance();
+    VMData &vm_instance();
 
 // inits from file(or any other stream); TODO (example - jvm)
     void init_vm(std::istream &in);

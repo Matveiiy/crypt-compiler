@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <stdexcept>
+#include <iostream>
 
 #include "misc.h"
 
@@ -29,6 +30,7 @@ namespace {
     constexpr uint32_t argAX = ((1 << SIZE_AX) - 1) << OPCODE_SIZE;
     constexpr uint32_t argJ = ((1 << SIZE_J) - 1) << OPCODE_SIZE;
     constexpr uint32_t J_shift = ((1 << SIZE_J) - 1) >> 1;
+    constexpr int32_t LOW_BITS31 = INT_MAX;
 
     typedef void (*service_f)();
 
@@ -85,19 +87,22 @@ namespace {
     };
 
     uint32_t fetch() {
+        for (Value* i = &vm.stack[0]; i < vm.sp; ++i) {
+            std::cout << i->as_int << std::endl;
+        }
+        std::cout << "_______________________\n";
         // printf("op code: %i\n", vm.code[vm.ip] & low_6bits);
         return vm.cur = vm.code[vm.ip++];
     }
 
     Value &peek(int offset = 0) {
-        return vm.stack[vm.sp - offset - 1];
+        return *(vm.sp - offset - 1);
     }
 
     std::pair<Value, Value> pop_two() {
-        vm.sp -= 2;
-        if (vm.sp < 0) {
+        if (vm.sp - vm.stack < 2)
             throw std::runtime_error("tried to pop from empty stack");
-        }
+        vm.sp -= 2;
         return std::make_pair<>(peek(-1), peek(-2));
     }
 
@@ -106,46 +111,55 @@ namespace {
     }
 
     void op_push_constant() {
-        vm.stack[vm.sp++] = vm.constant_pool[C()];
+        *vm.sp = vm.constant_pool[C()];
+        vm.sp++;
         DISPATCH();
     }
 
     void op_addi() {
         vm.sp--;
-        if (!(peek(0).mtype == ValueType::Int && peek(-1).mtype == ValueType::Int))
+        if (!(IS_INT(peek(0)) && IS_INT(peek(-1))))
             throw std::runtime_error("ERROR");
-        peek(0).mdata.asInt = peek(-1).mdata.asInt + peek(0).mdata.asInt;
+        peek(0).as_int = peek(-1).as_int + peek(0).as_int;
         DISPATCH();
     }
 
     void op_subi() {
         vm.sp--;
-        if (!(peek(0).mtype == ValueType::Int && peek(-1).mtype == ValueType::Int))
+        if (!(IS_INT(peek(0)) && IS_INT(peek(-1))))
             throw std::runtime_error("ERROR");
-        peek(0).mdata.asInt = peek(-1).mdata.asInt - peek(0).mdata.asInt;
+        peek(0).as_int = peek(-1).as_int - peek(0).as_int;
         DISPATCH();
     }
 
+    //https://source.chromium.org/chromium/v8/v8.git/+/6d706ae3a0153cf0272760132b775ae06ef13b1a:src/code-stub-assembler.cc
+    // crutch \/
+    //https://pages.cs.wisc.edu/~markhill/cs354/Fall2008/beyond354/int.mult.html
     void op_multi() {
         vm.sp--;
-        if (!(peek(0).mtype == ValueType::Int && peek(-1).mtype == ValueType::Int))
+        if (!(IS_INT(peek(0)) && IS_INT(peek(-1))))
             throw std::runtime_error("ERROR");
-        peek(0).mdata.asInt = peek(-1).mdata.asInt * peek(0).mdata.asInt;
+
+        uint64_t t1 = ((peek(-1).as_int >> 1));
+        uint64_t t2 = ((peek(0).as_int >> 1));
+        peek(0).as_int = (int32_t)((t1 * t2) & LOW_BITS31) << 1;
         DISPATCH();
     }
 
+
+    //TODO: test this
     void op_divi() {
         vm.sp--;
-        if (!(peek(0).mtype == ValueType::Int && peek(-1).mtype == ValueType::Int))
+        if (!(IS_INT(peek(0)) && IS_INT(peek(-1))))
             throw std::runtime_error("ERROR");
-        else if (peek().mdata.asInt == 0)
+        if (peek().as_int == 0)
             throw std::runtime_error("Division by zero");
-        peek(0).mdata.asInt = peek(-1).mdata.asInt / peek(0).mdata.asInt;
+        peek(0).as_int = ((peek(-1).as_int >> 1) / (peek(0).as_int >> 1)) << 1;
         DISPATCH();
     }
 
     void op_negate() {
-        peek().mdata.asInt = -peek().mdata.asInt;
+        peek().as_int = -peek().as_int;
         DISPATCH();
     }
 
@@ -191,7 +205,7 @@ namespace {
 
     void op_jmpt() {
         vm.sp--;
-        vm.ip += J * (peek(-1).mdata.asInt != 0);
+        vm.ip += J * (peek(-1).as_int != 0);
     }
 }  // namespace
 
@@ -204,106 +218,61 @@ namespace interpreter {
     }
 
     bool equal_val(Value val1, Value val2) {
-        if (val1.mtype != val2.mtype)
-            return false;
-
-        switch (val1.mtype) {
-            case ValueType::Char:
-            case ValueType::Int:
-                return val1.mdata.asInt == val2.mdata.asInt;
-            case ValueType::Double:
-                return val1.mdata.asDouble == val2.mdata.asDouble;
-        }
+        if (IS_INT(val1) && IS_INT(val2)) return val1.as_int == val2.as_int;
+        throw std::runtime_error("todo");
     }
 
     bool nequal_val(Value val1, Value val2) {
         return !equal_val(val1, val2);
     }
-
-    bool less(Value val1, Value val2) {
-        if (val1.mtype != val2.mtype)
-            throw std::runtime_error("Calling less on different types");
-
-        switch (val1.mtype) {
-            case ValueType::Char:
-            case ValueType::Int:
-                return val1.mdata.asInt < val2.mdata.asInt;
-            case ValueType::Double:
-                return val1.mdata.asDouble < val2.mdata.asDouble;
-        }
+    bool less(Value v1, Value v2) {
+        if (IS_INT(v1) && IS_INT(v2)) return v1.as_int < v2.as_int;
+        throw std::runtime_error("todo");
     }
-
-    bool less_equal(Value val1, Value val2) {
-        if (val1.mtype != val2.mtype)
-            throw std::runtime_error("Calling less or equal on different types");
-
-        switch (val1.mtype) {
-            case ValueType::Char:
-            case ValueType::Int:
-                return val1.mdata.asInt <= val2.mdata.asInt;
-            case ValueType::Double:
-                return val1.mdata.asDouble <= val2.mdata.asDouble;
-        }
+    bool less_equal(Value v1, Value v2) {
+        if (IS_INT(v1) && IS_INT(v2)) return v1.as_int <= v2.as_int;
+        throw std::runtime_error("todo");
     }
-
-    bool greater(Value val1, Value val2) {
-        if (val1.mtype != val2.mtype)
-            throw std::runtime_error("Calling greater on different types");
-
-        switch (val1.mtype) {
-            case ValueType::Char:
-            case ValueType::Int:
-                return val1.mdata.asInt > val2.mdata.asInt;
-            case ValueType::Double:
-
-                return val1.mdata.asDouble > val2.mdata.asDouble;
-        }
+    bool greater(Value v1, Value v2) {
+        if (IS_INT(v1) && IS_INT(v2)) return v1.as_int > v2.as_int;
+        throw std::runtime_error("todo");
     }
-
-    bool greater_equal(Value val1, Value val2) {
-        if (val1.mtype != val2.mtype)
-            throw std::runtime_error("Calling greater on different types");
-
-        switch (val1.mtype) {
-            case ValueType::Char:
-            case ValueType::Int:
-                return val1.mdata.asInt >= val2.mdata.asInt;
-            case ValueType::Double:
-                return val1.mdata.asDouble >= val2.mdata.asDouble;
-        }
+    bool greater_equal(Value v1, Value v2) {
+        if (IS_INT(v1) && IS_INT(v2)) return v1.as_int >= v2.as_int;
+        throw std::runtime_error("todo");
     }
-
-    void example() {
-        vm.constant_pool[0] = Value(ValueType::Int, 3);
-        vm.constant_pool[1] = Value(ValueType::Int, 2);
-        vm.code[0] = OP_CONSTANT;
-        vm.code[1] = 0;
-        vm.code[2] = OP_CONSTANT;
-        vm.code[3] = 1;
-        vm.code[4] = OP_ADDI;
-        run_program();
-        if (!(peek(0).mtype == ValueType::Int && peek(0).mdata.asInt == 5)) {
-            throw std::runtime_error("oops");
-        }
-    }
-
-    void jmp_example() {
-        vm.constant_pool[0] = Value(ValueType::Int, 3);
-        vm.constant_pool[1] = Value(ValueType::Int, 2);
-        vm.constant_pool[2] = Value(ValueType::Int, 100000);
-        vm.constant_pool[3] = Value(ValueType::Int, 5);
-        vm.code[0] = OP_CONSTANT + 0;                            // 3
-        vm.code[1] = OP_CONSTANT + (1 << OPCODE_SIZE);           // 2
-        vm.code[2] = OP_CONSTANT + (3 << OPCODE_SIZE);           // 5
-        vm.code[3] = OP_JMPNE + ((1 + J_shift) << OPCODE_SIZE);  // skip next operation
-        vm.code[4] = OP_CONSTANT + (2 << OPCODE_SIZE);           // if not skipped pulls big number into stack
-        vm.code[5] = OP_CONSTANT + (1 << OPCODE_SIZE);           // 2
-        vm.code[6] = OP_ADDI;                                    // expected to add 3 and 2
-        run_program();
-
-        if (!(peek().mtype == ValueType::Int && peek().mdata.asInt == 5)) {
-            throw std::runtime_error("jump example failed");
-        }
-    }
+//
+//    void example() {
+//        vm.constant_pool[0] = Value(ValueType::Int, 3);
+//        vm.constant_pool[1] = Value(ValueType::Int, 2);
+//        vm.code[0] = OP_CONSTANT;
+//        vm.code[1] = 0;
+//        vm.code[2] = OP_CONSTANT;
+//        vm.code[3] = 1;
+//        vm.code[4] = OP_ADDI;
+//        run_program();
+//        if (!(peek(0).mtype == ValueType::Int && peek(0).mdata.asInt == 5)) {
+//            throw std::runtime_error("oops");
+//        }
+//    }
+//
+//    void jmp_example() {
+//        vm.constant_pool[0] = Value(ValueType::Int, 3);
+//        vm.constant_pool[1] = Value(ValueType::Int, 2);
+//        vm.constant_pool[2] = Value(ValueType::Int, 100000);
+//        vm.constant_pool[3] = Value(ValueType::Int, 5);
+//        vm.code[0] = OP_CONSTANT + 0;                            // 3
+//        vm.code[1] = OP_CONSTANT + (1 << OPCODE_SIZE);           // 2
+//        vm.code[2] = OP_CONSTANT + (3 << OPCODE_SIZE);           // 5
+//        vm.code[3] = OP_JMPNE + ((1 + J_shift) << OPCODE_SIZE);  // skip next operation
+//        vm.code[4] = OP_CONSTANT + (2 << OPCODE_SIZE);           // if not skipped pulls big number into stack
+//        vm.code[5] = OP_CONSTANT + (1 << OPCODE_SIZE);           // 2
+//        vm.code[6] = OP_ADDI;                                    // expected to add 3 and 2
+//        run_program();
+//
+//        if (!(peek().mtype == ValueType::Int && peek().mdata.asInt == 5)) {
+//            throw std::runtime_error("jump example failed");
+//        }
+//    }
 
 }  // namespace interpreter

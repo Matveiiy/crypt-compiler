@@ -77,22 +77,29 @@ namespace {
     void op_jmp();
 
     void op_jmpt();
+    void op_call();
 
     service_f workers[] = {
-            op_stop, op_end, op_return,                                 // Code block endings
+            op_stop, op_call, op_end, op_return,                                 // Code block endings
             op_push_constant, op_todo, op_todo,                                   // Pushes to stack
             op_addi, op_subi, op_divi, op_multi, op_negate,            // In stack arithmetics
             op_jmpne, op_jmpeq, op_jmplt, op_jmple, op_jmpgt, op_jmpge,  // Jumps
             op_jmp, op_jmpt                                              // Jumps2
     };
 
+    void op_call() {
+        throw std::runtime_error("TODO");
+    }
     uint32_t fetch() {
         for (Value* i = &vm.stack[0]; i < vm.sp; ++i) {
             std::cout << i->as_int << std::endl;
         }
         std::cout << "_______________________\n";
         // printf("op code: %i\n", vm.code[vm.ip] & low_6bits);
-        return vm.cur = vm.code[vm.ip++];
+//        return vm.cur = vm.code[vm.ip++];
+        vm.cur = *(vm.cur_function->ip);
+        vm.cur_function->ip++;
+        return vm.cur;
     }
 
     Value &peek(int offset = 0) {
@@ -165,47 +172,47 @@ namespace {
 
     void op_jmpne() {
         std::pair<Value, Value> popped = pop_two();
-        vm.ip += J * int(nequal_val(popped.first, popped.second));
+        vm.cur_function->ip += J * int(nequal_val(popped.first, popped.second));
         DISPATCH();
     }
 
     void op_jmpeq() {
         std::pair<Value, Value> popped = pop_two();
-        vm.ip += J * int(equal_val(popped.first, popped.second));
+        vm.cur_function->ip += J * int(equal_val(popped.first, popped.second));
         DISPATCH();
     }
 
     void op_jmplt() {
         std::pair<Value, Value> popped = pop_two();
-        vm.ip += J * int(less(popped.first, popped.second));
+        vm.cur_function->ip += J * int(less(popped.first, popped.second));
         DISPATCH();
     }
 
     void op_jmple() {
         std::pair<Value, Value> popped = pop_two();
-        vm.ip += J * int(less_equal(popped.first, popped.second));
+        vm.cur_function->ip += J * int(less_equal(popped.first, popped.second));
         DISPATCH();
     }
 
     void op_jmpge() {
         std::pair<Value, Value> popped = pop_two();
-        vm.ip += J * int(greater_equal(popped.first, popped.second));
+        vm.cur_function->ip += J * int(greater_equal(popped.first, popped.second));
         DISPATCH();
     }
 
     void op_jmpgt() {
         std::pair<Value, Value> popped = pop_two();
-        vm.ip += J * int(greater(popped.first, popped.second));
+        vm.cur_function->ip += J * int(greater(popped.first, popped.second));
         DISPATCH();
     }
 
     void op_jmp() {
-        vm.ip += J;
+        vm.cur_function->ip += J;
     }
 
     void op_jmpt() {
         vm.sp--;
-        vm.ip += J * (peek(-1).as_int != 0);
+        vm.cur_function->ip += J * (peek(-1).as_int != 0);
     }
 }  // namespace
 

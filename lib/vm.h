@@ -21,6 +21,8 @@ namespace interpreter {
         //== Code block endings
 
         OP_STOP,
+
+        OP_CALL,
         OP_END,     // return from void function
         OP_RETURN,  // returns from function
 
@@ -86,8 +88,35 @@ typedef void(*nativeFunc)(VMData&);
     struct ObjInstance {
         ObjClass* classptr;
     };
+    /*
+     * Calling convention:
+     OP_CALL:
+     *    STACK   <- before function call
+     * |   arg1     | <- sp
+     * |   arg2     |
+     * |   ...      |
+     * |  arg_n     |
+     * | ret frame  | - (here might be more slots, frame might mean ip, function, code* etc.)
+     * |  ...       |
+     * Function should put return value in place of the last argument(as if it popped all arguments from stack and pushed result)
+     OP_RETURN(if has return value):
+     *    STACK   <- before OP_RETURN
+     * |  f result  | <- sp
+     * |  ret frame |
+     * |    ...     |
+     * OP_RETURN - move result below ret frame, swaps  (return frame) and jumps to the function start
+     *    STACK   <- after function call
+     * |  f result  |
+     * |    ...     |
+     * OP_END(if has return value) return, but doesn't expect return value(void function)
+     * TODO: OP_TAILCALL(difference is that change return frame for this function call - omit pushing this function's frame)
+     * Frame: frame ptr*
+     */
+
     struct ObjFunction {
-        ObjClass* classptr;
+        ObjClass* classptr;//TODO: <- this ptr is not necessary
+        uint32_t* ip = &code[0];
+        uint32_t code[1024];//capacity
         int params = 0;
     };
     struct Value {
@@ -119,14 +148,16 @@ typedef void(*nativeFunc)(VMData&);
     struct VMData {
         Value constant_pool[MAX_CONSTANTS];
         int constant_count = 0;
+        ObjFunction* cur_function = &functions[0];
         Value* sp = &stack[0];
-        uint32_t ip = 0, bp = 0;
+        uint32_t bp = 0;
         uint32_t cur = 0;
-        uint32_t code[1024];  // actually will contain list of function - each has a pointer to a block of code
 
-        void* heap[1000];//HEAP_SIZE TODO: <- remove this
-        Value stack[PROGRAM_STACK_SIZE];
-        Value locals[1024];
+        void* heap[1000];//HEAP_SIZE - basically program memory TODO: <- remove this and manage with gc
+        Value stack[PROGRAM_STACK_SIZE];//not very big, computations only
+        Value locals[1024];//can be large
+        ObjFunction functions[1024];//each function has its own frame????
+        ObjFunction* call_stack[1024];//call stack - can be huge
     };
 
     bool less(Value val1, Value val2);

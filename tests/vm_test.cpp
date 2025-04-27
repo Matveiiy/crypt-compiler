@@ -9,12 +9,29 @@ using namespace interpreter;
 struct BytecodeHolder {
     std::unordered_map<std::string, int> labels;
     std::vector<std::pair<std::string, int>> pending_labels;
+
+    VMData &vm;
     std::vector<uint32_t> code;
 
-    BytecodeHolder() {}
+    BytecodeHolder(VMData &vm) : vm(vm) { vm.cur_function = vm.functions; }
 
     BytecodeHolder &emit(OpCode op) {
         code.push_back(op);
+        return *this;
+    }
+
+    BytecodeHolder &beginFunc(int nargs) {
+        code.clear();
+        vm.cur_function->params = nargs;
+        return *this;
+    }
+
+    BytecodeHolder &endFunc() {
+        this->update();
+        labels.clear();
+        vm.cur_function->ip = vm.cur_function->code;
+        std::copy(code.begin(), code.end(), vm.cur_function->code);
+        vm.cur_function++;
         return *this;
     }
 
@@ -33,6 +50,9 @@ struct BytecodeHolder {
 
     BytecodeHolder &jmp(OpCode jmpType, std::string label) {
         return pending_labels.emplace_back(label, code.size()), emit(jmpType);
+    }
+    BytecodeHolder &emitCall(OpCode jmpType, int funcId) {
+        return emitC(jmpType, funcId);
     }
 
     BytecodeHolder &emitJ(OpCode op) {
@@ -54,15 +74,13 @@ struct BytecodeHolder {
 
 template<class T>
 void run_checked(std::vector<Value> constants, BytecodeHolder &h, T check) {
-    VMData &vm = vm_instance();
-    vm.heap[0] = new ObjClass{.name = "NULL"};
+    h.vm.heap[0] = new ObjClass{.name = "NULL"};
     h.emit(OP_STOP);
-    memcpy(vm.constant_pool, constants.data(), constants.size() * sizeof(Value));
-    std::copy(h.code.begin(), h.code.end(), vm.code);
-    vm.sp = vm.stack;
-    vm.ip = 0;
+    memcpy(h.vm.constant_pool, constants.data(), constants.size() * sizeof(Value));
+    h.vm.cur_function = h.vm.functions;
+    h.vm.sp = h.vm.stack;
     run();
-    check(vm);
+    check(h.vm);
 }
 
 void run1(std::vector<Value> constants, BytecodeHolder &h, std::vector<Value> stack) {
@@ -86,7 +104,8 @@ TEST(VmExampleStackTestSuite, ExampleTest) {
                  Value::boxedInt(100000),
                  Value::boxedInt(5),
          },
-         BytecodeHolder()
+         BytecodeHolder(vm_instance())
+                 .beginFunc(0)
                  .emitC(OP_CONSTANT, 0)
                  .emitC(OP_CONSTANT, 1)
                  .emitC(OP_CONSTANT, 3)
@@ -95,7 +114,7 @@ TEST(VmExampleStackTestSuite, ExampleTest) {
                  .label("l1")
                  .emitC(OP_CONSTANT, 1)
                  .emit(OP_ADDI)
-                 .update(), {
+                 .endFunc(), {
                  Value::boxedInt(5),
          });
     //4 * 2 * 3 + 4 + 8 - 7 * 7 = 24 + 12 - 49 = -13
@@ -106,7 +125,8 @@ TEST(VmExampleStackTestSuite, ExampleTest) {
                  Value::boxedInt(8),
                  Value::boxedInt(7)
          },
-         BytecodeHolder()
+         BytecodeHolder(vm_instance())
+                 .beginFunc(0)
                  .emitC(OP_CONSTANT, 4)
                  .emitC(OP_CONSTANT, 4)
                  .emit(OP_MULI)
@@ -120,8 +140,9 @@ TEST(VmExampleStackTestSuite, ExampleTest) {
                  .emitC(OP_CONSTANT, 3)
                  .emit(OP_ADDI)
                  .emit(OP_SUBI)
-                 .update(), {
+                 .endFunc(), {
                  Value::boxedInt(-13)
          });
+
 
 }
